@@ -12,3 +12,17 @@ venv/
 
 # Ignore large files or logs
 *.log
+
+# Artifacts
+*.pkl
+*.tar.gz
+*.csv
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+
+# Python
+__pycache__/
+.env
