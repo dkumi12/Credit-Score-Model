@@ -22,3 +22,8 @@ output "api_gateway_url" {
   description = "Public API Gateway URL — use this to call /predict and /health"
   value       = aws_apigatewayv2_api.main.api_endpoint
 }
+
+output "frontend_url" {
+  description = "Streamlit frontend — open this in your browser"
+  value       = "http://${aws_lb.main.dns_name}"
+}

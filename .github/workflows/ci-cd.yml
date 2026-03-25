@@ -81,8 +81,9 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     outputs:
-      sagemaker_image_uri: ${{ steps.meta-sagemaker.outputs.tags_csv }}
-      api_image_uri: ${{ steps.meta-api.outputs.tags_csv }}
+      sagemaker_image_uri:  ${{ steps.meta-sagemaker.outputs.tags_csv }}
+      api_image_uri:        ${{ steps.meta-api.outputs.tags_csv }}
+      frontend_image_uri:   ${{ steps.meta-frontend.outputs.tags_csv }}
 
     steps:
     - uses: actions/checkout@v4
@@ -114,6 +115,12 @@ jobs:
           --region ${{ env.AWS_REGION }} 2>/dev/null \
           || aws ecr create-repository \
                --repository-name ${{ env.PROJECT_NAME }}-api \
+               --region ${{ env.AWS_REGION }}
+
+        aws ecr describe-repositories --repository-names ${{ env.PROJECT_NAME }}-frontend \
+          --region ${{ env.AWS_REGION }} 2>/dev/null \
+          || aws ecr create-repository \
+               --repository-name ${{ env.PROJECT_NAME }}-frontend \
                --region ${{ env.AWS_REGION }}
 
     # ── SageMaker inference container ────────────────────────────────────────
@@ -163,6 +170,27 @@ jobs:
         tags: ${{ steps.meta-api.outputs.tags }}
         cache-from: type=gha,scope=api
         cache-to:   type=gha,scope=api,mode=max
+
+    # ── Streamlit frontend container ──────────────────────────────────────────
+    - name: Compute frontend image tags
+      id: meta-frontend
+      run: |
+        REGISTRY=${{ steps.ecr-login.outputs.registry }}
+        REPO=${{ env.PROJECT_NAME }}-frontend
+        SHA_TAG=$REGISTRY/$REPO:${{ github.sha }}
+        LATEST_TAG=$REGISTRY/$REPO:latest
+        echo "tags_csv=$SHA_TAG" >> $GITHUB_OUTPUT
+        echo "tags=$SHA_TAG,$LATEST_TAG" >> $GITHUB_OUTPUT
+
+    - name: Build & push frontend image (cached)
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: docker/Dockerfile.frontend
+        push: true
+        tags: ${{ steps.meta-frontend.outputs.tags }}
+        cache-from: type=gha,scope=frontend
+        cache-to:   type=gha,scope=frontend,mode=max
 
   # ── 4. Terraform → deploy SageMaker + ECS + API Gateway ──────────────────────
   deploy:
@@ -273,7 +301,8 @@ jobs:
       run: |
         terraform apply -auto-approve \
           -var="sagemaker_image_uri=${{ needs.build-and-push.outputs.sagemaker_image_uri }}" \
-          -var="api_image_uri=${{ needs.build-and-push.outputs.api_image_uri }}"
+          -var="api_image_uri=${{ needs.build-and-push.outputs.api_image_uri }}" \
+          -var="frontend_image_uri=${{ needs.build-and-push.outputs.frontend_image_uri }}"
 
     - name: Print live endpoints
       working-directory: terraform
@@ -285,4 +314,7 @@ jobs:
         echo ""
         echo " SageMaker endpoint:"
         terraform output sagemaker_endpoint_name
+        echo ""
+        echo " Frontend URL (Streamlit):"
+        terraform output frontend_url
         echo "========================================"

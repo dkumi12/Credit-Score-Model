@@ -19,3 +19,8 @@ variable "api_image_uri" {
   description = "ECR URI for the FastAPI ECS container (output of build_and_push.sh)"
   type        = string
 }
+
+variable "frontend_image_uri" {
+  description = "ECR URI for the Streamlit frontend ECS container"
+  type        = string
+}
