@@ -208,14 +208,35 @@ jobs:
           -backend-config="region=${{ env.AWS_REGION }}" \
           -backend-config="encrypt=true"
 
-    # Delete the 3 resources that survive the cleanup script so Terraform
-    # can recreate them cleanly. These are stateless — safe to delete.
-    # Runs in under 10 seconds. Errors are ignored if already gone.
+    # Pre-flight: delete resources that need to be recreated fresh.
+    # SageMaker endpoint must be deleted so the new container image is used
+    # (Terraform in-place update does NOT pull a new image — only recreation does).
     - name: Pre-flight resource cleanup
       run: |
         REGION=${{ env.AWS_REGION }}
         PROJECT=${{ env.PROJECT_NAME }}
 
+        # ── SageMaker — delete endpoint first, then config, then model ────────
+        echo "Deleting SageMaker endpoint (waits for full deletion)..."
+        aws sagemaker delete-endpoint \
+          --endpoint-name "${PROJECT}-endpoint" \
+          --region $REGION 2>/dev/null && \
+          aws sagemaker wait endpoint-deleted \
+            --endpoint-name "${PROJECT}-endpoint" \
+            --region $REGION 2>/dev/null && \
+          echo "  endpoint deleted" || echo "  endpoint already gone"
+
+        echo "Deleting SageMaker endpoint config..."
+        aws sagemaker delete-endpoint-config \
+          --endpoint-config-name "${PROJECT}-endpoint-config" \
+          --region $REGION 2>/dev/null && echo "  deleted" || echo "  already gone"
+
+        echo "Deleting SageMaker model..."
+        aws sagemaker delete-model \
+          --model-name "${PROJECT}-model" \
+          --region $REGION 2>/dev/null && echo "  deleted" || echo "  already gone"
+
+        # ── ECS + networking ──────────────────────────────────────────────────
         echo "Deleting CloudWatch log group..."
         aws logs delete-log-group \
           --log-group-name "/ecs/${PROJECT}-api" \
@@ -225,8 +246,6 @@ jobs:
           --filters "Name=isDefault,Values=true" \
           --query "Vpcs[0].VpcId" --output text --region $REGION)
 
-        # Delete ECS SG first — it references ALB SG, so ALB SG can't be
-        # deleted while ECS SG still exists.
         echo "Deleting ECS security group..."
         ECS_SG=$(aws ec2 describe-security-groups \
           --filters "Name=group-name,Values=${PROJECT}-ecs-sg" \
