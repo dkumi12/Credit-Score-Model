@@ -1,382 +1,263 @@
-# 💳 Credit Score Prediction Model
+# 💳 Credit Score Classifier
 
-[![Python](https://img.shields.io/badge/Python-3.9+-3776AB?logo=python&logoColor=white)](https://python.org)
-[![AWS SageMaker](https://img.shields.io/badge/AWS-SageMaker-FF9900?logo=amazon-aws&logoColor=white)](https://aws.amazon.com/sagemaker/)
-[![Terraform](https://img.shields.io/badge/Terraform-7B42BC?logo=terraform&logoColor=white)](https://terraform.io)
-[![Scikit-learn](https://img.shields.io/badge/Scikit--learn-F7931E?logo=scikit-learn&logoColor=white)](https://scikit-learn.org)
+[![CI/CD](https://github.com/dkumi12/Credit-Score-Model/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/dkumi12/Credit-Score-Model/actions/workflows/ci-cd.yml)
+[![Python](https://img.shields.io/badge/Python-3.9-3776AB?logo=python&logoColor=white)](https://python.org)
+[![AWS](https://img.shields.io/badge/AWS-SageMaker%20%7C%20ECS%20%7C%20API%20Gateway-FF9900?logo=amazon-aws&logoColor=white)](https://aws.amazon.com)
+[![Terraform](https://img.shields.io/badge/IaC-Terraform-7B42BC?logo=terraform&logoColor=white)](https://terraform.io)
+[![Docker](https://img.shields.io/badge/Docker-Containerised-2496ED?logo=docker&logoColor=white)](https://docker.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Production ML system for credit risk prediction with AWS SageMaker deployment and Terraform infrastructure-as-code**
+> End-to-end MLOps project — Random Forest credit risk classifier trained with scikit-learn and MLflow, containerised with Docker, and deployed on AWS using SageMaker, ECS Fargate, and API Gateway, fully automated via GitHub Actions CI/CD.
 
-Machine learning model predicting credit score classification (Good/Bad) using Random Forest with comprehensive feature engineering and cloud deployment pipeline.
+**Live demo:** `http://credit-score-alb-<id>.us-east-1.elb.amazonaws.com`
+**API endpoint:** `https://4p97tzuzvd.execute-api.us-east-1.amazonaws.com`
 
 ---
 
 ## 📋 Table of Contents
 
-- [Overview](#-overview)
-- [Model Performance](#-model-performance)
 - [Architecture](#-architecture)
-- [Features](#-features)
-- [Quick Start](#-quick-start)
-- [AWS SageMaker Deployment](#-aws-sagemaker-deployment)
-- [Terraform Infrastructure](#-terraform-infrastructure)
-- [API Usage](#-api-usage)
-- [Tech Stack](#-tech-stack)
 - [Project Structure](#-project-structure)
-
----
-
-## 🎯 Overview
-
-Credit Score Model is a production-grade machine learning system that predicts credit risk based on demographic and financial features. Built with MLOps best practices including automated deployment, infrastructure-as-code, and comprehensive testing.
-
-### Key Achievements
-
-- **Random Forest Classifier** with optimized hyperparameters
-- **AWS SageMaker Endpoint** deployment for scalable inference
-- **Terraform Infrastructure** for reproducible cloud deployments
-- **RESTful API** with FastAPI for real-time predictions
-- **Comprehensive Testing** with unit tests and integration tests
-
----
-
-## 📊 Model Performance
-
-| Metric | Score |
-|--------|-------|
-| **Algorithm** | Random Forest Classifier |
-| **Features** | 9 demographic + financial variables |
-| **Target Classes** | Good / Bad Credit Score |
-| **Deployment** | AWS SageMaker Real-time Endpoint |
-
-### Input Features
-
-- Age
-- Gender  
-- Education Level
-- Marital Status
-- Number of Children
-- Annual Income
-- Home Ownership Status
-- Employment Status
-- Loan Amount (if applicable)
+- [Model](#-model)
+- [API Reference](#-api-reference)
+- [CI/CD Pipeline](#-cicd-pipeline)
+- [Infrastructure](#-infrastructure)
+- [Local Development](#-local-development)
+- [Tech Stack](#-tech-stack)
 
 ---
 
 ## 🏗️ Architecture
 
-### System Design
-
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                    AWS Cloud Environment                     │
-│                                                              │
-│  ┌────────────┐      ┌──────────────┐      ┌─────────────┐ │
-│  │     S3     │─────▶│  SageMaker   │─────▶│  Endpoint   │ │
-│  │            │      │    Model     │      │  (Real-time)│ │
-│  │ model.pkl  │      │              │      │             │ │
-│  │ scaler.pkl │      │  Scikit-learn│      │ ml.t2.medium│ │
-│  └────────────┘      │  Container   │      └─────────────┘ │
-│                      └──────────────┘              │        │
-│                                                    │        │
-│                                            ┌───────▼──────┐ │
-│                                            │  API Gateway │ │
-│                                            │  (Optional)  │ │
-│                                            └──────────────┘ │
-└──────────────────────────────────────────────────────────────┘
-           │
-           │ Managed by Terraform
-           ▼
-    ┌─────────────┐
-    │ terraform/  │
-    │  main.tf    │
-    └─────────────┘
+Browser
+   │
+   ▼
+Streamlit UI  ──────────────────────────────────────────────┐
+(ECS Fargate)                                               │
+                                                            │
+   ┌────────────────────────────────────────────────────────┘
+   │          POST /predict
+   ▼
+API Gateway  (HTTP API)
+   │
+   ▼
+ALB  (path-based routing)
+   │
+   ├── /predict  /health  /docs ──▶  FastAPI  (ECS Fargate)
+   │                                     │
+   │                                     │ InvokeEndpoint
+   │                                     ▼
+   │                              SageMaker Endpoint
+   │                              (custom Docker container
+   │                               scikit-learn 1.2.2
+   │                               RandomForest Pipeline)
+   │
+   └── /*  ──▶  Streamlit Frontend  (ECS Fargate)
 ```
 
-### Deployment Flow
-
-1. **Model Training:** Train Random Forest locally with GridSearchCV
-2. **Model Packaging:** Serialize model and scaler to .pkl files
-3. **S3 Upload:** Upload model artifacts to S3 bucket
-4. **Terraform Apply:** Create SageMaker model, endpoint config, and endpoint
-5. **API Integration:** Connect endpoint to FastAPI for predictions
+### Why custom Docker for SageMaker?
+The built-in SageMaker scikit-learn container caused dependency conflicts. Baking the exact training environment (`scikit-learn==1.2.2`, `numpy<2.0`) into a custom image eliminates version mismatches entirely.
 
 ---
 
-## 🚀 Quick Start
-
-### Local Development
-
-1. **Clone the repository**
-```bash
-git clone https://github.com/dkumi12/Credit-Score-Model.git
-cd Credit-Score-Model
-```
-
-2. **Install dependencies**
-```bash
-pip install -r requirements.txt
-```
-
-3. **Train the model**
-```bash
-python Src/api.py
-```
-
-4. **Run API locally**
-```bash
-uvicorn app:app --host 0.0.0.0 --port 8000
-```
-
----
-
-## ☁️ AWS SageMaker Deployment
-
-### Prerequisites
-- AWS CLI configured
-- Terraform installed
-- S3 bucket for model artifacts
-
-### Deployment Steps
-
-1. **Package the model for SageMaker**
-```bash
-# Model and dependencies are packaged in Models/
-tar -czf model.tar.gz -C Models credit_scoring_model.pkl scaler.pkl
-```
-
-2. **Upload to S3**
-```bash
-aws s3 cp model.tar.gz s3://dkumi12-credit-score-project/
-```
-
-3. **Deploy with Terraform**
-```bash
-cd terraform
-
-# Initialize Terraform
-terraform init
-
-# Review deployment plan
-terraform plan -var="model_s3_url=s3://dkumi12-credit-score-project/model.tar.gz"
-
-# Deploy infrastructure
-terraform apply -var="model_s3_url=s3://dkumi12-credit-score-project/model.tar.gz"
-```
-
-4. **Get endpoint details**
-```bash
-aws sagemaker describe-endpoint --endpoint-name credit-score-project-endpoint
-```
-
----
-
-## 📡 API Usage
-
-### Local Prediction
-
-```python
-import requests
-
-response = requests.post(
-    "http://localhost:8000/predict",
-    json={
-        "age": 35,
-        "gender": "Male",
-        "education": "Bachelor's",
-        "marital_status": "Married",
-        "num_children": 2,
-        "income": 75000,
-        "home_ownership": "Own",
-        "employment_status": "Employed"
-    }
-)
-
-print(response.json())
-# Output: {"prediction": "Good", "confidence": 0.87, "risk_score": 0.13}
-```
-
-### SageMaker Endpoint Prediction
-
-```python
-import boto3
-import json
-
-sagemaker_runtime = boto3.client('sagemaker-runtime', region_name='us-east-1')
-
-payload = {
-    "instances": [{
-        "age": 35,
-        "gender": "Male",
-        "education": "Bachelor's",
-        "marital_status": "Married",
-        "num_children": 2,
-        "income": 75000,
-        "home_ownership": "Own",
-        "employment_status": "Employed"
-    }]
-}
-
-response = sagemaker_runtime.invoke_endpoint(
-    EndpointName='credit-score-project-endpoint',
-    ContentType='application/json',
-    Body=json.dumps(payload)
-)
-
-result = json.loads(response['Body'].read().decode())
-print(result)
-```
-
----
-
-## 🗂️ Project Structure
+## 📁 Project Structure
 
 ```
 Credit-Score-Model/
-├── README.md
-├── requirements.txt
-├── app.py                      # FastAPI application
-├── Src/
-│   ├── api.py                  # Model training pipeline
-│   ├── sagemaker_entry.py     # SageMaker inference script
-│   ├── utils.py               # Helper functions
-│   └── __init__.py
+├── .github/
+│   └── workflows/
+│       └── ci-cd.yml           # Full CI/CD pipeline
 ├── Data/
 │   └── Credit Score Classification Dataset.csv
 ├── Models/
-│   ├── credit_scoring_model.pkl
+│   ├── credit_scoring_model.pkl  # Trained sklearn Pipeline
 │   └── scaler.pkl
+├── Src/
+│   ├── api.py                  # FastAPI — /predict /health
+│   └── utils.py                # Preprocessing helpers
+├── docker/
+│   ├── Dockerfile.sagemaker    # Custom SageMaker inference container
+│   ├── Dockerfile.api          # FastAPI container (ECS)
+│   ├── Dockerfile.frontend     # Streamlit container (ECS)
+│   ├── serve.py                # SageMaker Flask server (/ping /invocations)
+│   └── requirements-api.txt
 ├── terraform/
-│   └── main.tf                # Infrastructure as Code
+│   ├── main.tf                 # Provider + S3 backend
+│   ├── variables.tf
+│   ├── ecr.tf                  # ECR repositories
+│   ├── iam.tf                  # Roles for SageMaker + ECS
+│   ├── sagemaker.tf            # Model, endpoint config, endpoint
+│   ├── networking.tf           # VPC, SGs, ALB, target groups
+│   ├── ecs.tf                  # Cluster, task defs, services
+│   ├── api_gateway.tf          # HTTP API + integration
+│   └── outputs.tf
+├── scripts/
+│   ├── tf_import_existing.sh   # Import pre-existing AWS resources into state
+│   └── cleanup_aws.sh          # Tear down AWS resources
 ├── tests/
-│   ├── test_utils.py
-│   └── __init__.py
-└── credit-score-infographic/  # React visualization dashboard
+│   └── test_utils.py
+├── app.py                      # Streamlit frontend
+└── requirements.txt            # Frontend deps only
 ```
 
 ---
 
-## 💻 Tech Stack
+## 🤖 Model
 
-**Machine Learning:**
-- Scikit-learn (Random Forest)
-- Pandas (Data preprocessing)
-- NumPy (Numerical operations)
-- Joblib (Model serialization)
+| Property | Detail |
+|---|---|
+| Algorithm | Random Forest Classifier (sklearn Pipeline) |
+| Preprocessing | `ColumnTransformer` — `StandardScaler` (numeric) + `OneHotEncoder` (categorical) |
+| Target | Credit Score: **Low / Average / High** |
+| Training tool | MLflow (experiment tracking) |
+| Serialisation | `joblib` → `credit_scoring_model.pkl` |
 
-**Cloud Infrastructure:**
-- AWS SageMaker (Model hosting)
-- AWS S3 (Model storage)
-- Terraform (Infrastructure as Code)
+### Input features
 
-**API & Deployment:**
-- FastAPI (REST API)
-- Uvicorn (ASGI server)
-- Docker (Containerization)
+| Feature | Type |
+|---|---|
+| Age | Numeric |
+| Gender | Categorical |
+| Annual Income | Numeric |
+| Education Level | Categorical |
+| Marital Status | Categorical |
+| Number of Children | Numeric |
+| Home Ownership | Categorical |
 
 ---
 
-## 🔐 Model Details
+## 📡 API Reference
 
-### Feature Engineering
+**Base URL:** `https://4p97tzuzvd.execute-api.us-east-1.amazonaws.com`
 
-- **Categorical Encoding:** One-Hot Encoding for gender, education, marital status
-- **Numerical Scaling:** StandardScaler for age, income, num_children
-- **Feature Selection:** Correlation analysis and feature importance ranking
+### `GET /health`
+```json
+{ "status": "healthy", "endpoint": "credit-score-endpoint" }
+```
 
-### Hyperparameter Tuning
+### `POST /predict`
 
-```python
-param_grid = {
-    'n_estimators': [100, 200, 300],
-    'max_depth': [10, 20, 30, None],
-    'min_samples_split': [2, 5, 10],
-    'min_samples_leaf': [1, 2, 4]
+**Request:**
+```json
+{
+  "age": 35,
+  "gender": "Male",
+  "income": 75000,
+  "education": "Bachelor's Degree",
+  "marital_status": "Single",
+  "num_children": 0,
+  "home_ownership": "Rented"
 }
 ```
 
-Optimized using GridSearchCV with 5-fold cross-validation.
-
----
-
-## 📈 Monitoring & Observability
-
-### SageMaker Metrics
-- Invocation count and latency
-- Model drift detection (planned)
-- Cost tracking per prediction
-
-### Logging
-```bash
-# View SageMaker endpoint logs
-aws logs tail /aws/sagemaker/Endpoints/credit-score-project-endpoint --follow
+**Response:**
+```json
+{ "credit_score": "High" }
 ```
 
----
-
-## 💰 Cost Optimization
-
-- **Instance Type:** ml.t2.medium (cost-effective for low-traffic)
-- **Auto-scaling:** Configure based on invocation metrics
-- **Endpoint Lifecycle:** Stop endpoint when not in use to save costs
-
+**Example — curl:**
 ```bash
-# Stop endpoint to save costs
-aws sagemaker delete-endpoint --endpoint-name credit-score-project-endpoint
-```
-
----
-
-## 🧪 Testing
-
-```bash
-# Run unit tests
-pytest tests/
-
-# Test SageMaker deployment
-python test_deployment.py
+curl -X POST https://4p97tzuzvd.execute-api.us-east-1.amazonaws.com/predict \
+  -H "Content-Type: application/json" \
+  -d '{"age":35,"gender":"Male","income":75000,"education":"Bachelor'\''s Degree","marital_status":"Single","num_children":0,"home_ownership":"Rented"}'
 ```
 
 ---
 
 ## 🔄 CI/CD Pipeline
 
-Automated deployment workflow:
-1. Code push to `main` branch
-2. GitHub Actions runs tests
-3. Model artifacts uploaded to S3
-4. Terraform applies infrastructure changes
-5. SageMaker endpoint updated with new model
+Push to `main` triggers a 4-job GitHub Actions workflow:
+
+```
+test ──▶ build-and-push ──▶ deploy
+ │              │               │
+ │    Build 3 Docker images     │
+ │    Push to ECR               │
+ │                       Terraform apply:
+ │                       - SageMaker endpoint (new image)
+ │                       - ECS services (API + frontend)
+ │                       - API Gateway routes
+ │
+security (runs in parallel with test)
+```
+
+**Required GitHub Secrets:**
+
+| Secret | Description |
+|---|---|
+| `AWS_ACCESS_KEY_ID` | IAM user with SageMaker, ECS, ECR, ALB, API Gateway permissions |
+| `AWS_SECRET_ACCESS_KEY` | Corresponding secret key |
+
+**Average pipeline duration:** ~25–35 min (SageMaker endpoint creation dominates)
 
 ---
 
-## 📝 Future Enhancements
+## 🏛️ Infrastructure
 
-- [ ] Add model versioning with MLflow
-- [ ] Implement A/B testing for model variants
-- [ ] Create React dashboard for credit score visualization
-- [ ] Add explainability with SHAP values
-- [ ] Integrate with loan application workflow
+All AWS resources are managed by Terraform with state stored in S3.
+
+| Resource | Details |
+|---|---|
+| ECR | 3 repositories — sagemaker-model, api, frontend |
+| SageMaker | Custom Docker endpoint on `ml.m5.large` |
+| ECS Cluster | Fargate — 2 services (API + frontend) |
+| ALB | Path-based routing — `/predict` → API, `/*` → frontend |
+| API Gateway | HTTP API → ALB integration |
+| CloudWatch | Log groups for both ECS services |
+| S3 | Terraform state bucket (per-account, versioned, encrypted) |
+
+**Deploy from scratch:**
+```bash
+# 1. Add AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY to GitHub Secrets
+# 2. Push to main — the pipeline handles everything
+git push origin main
+```
+
+**Tear down:**
+```bash
+bash scripts/cleanup_aws.sh
+cd terraform && terraform destroy
+```
 
 ---
 
-## 🤝 Contributing
+## 💻 Local Development
 
-This is a portfolio project. For questions or collaboration opportunities, reach out via:
+```bash
+git clone https://github.com/dkumi12/Credit-Score-Model.git
+cd Credit-Score-Model
 
-- **Email:** 12dkumi@gmail.com
-- **LinkedIn:** [david-osei-kumi](https://linkedin.com/in/david-osei-kumi)
-- **GitHub:** [@dkumi12](https://github.com/dkumi12)
+# Frontend only (points at live API by default)
+pip install -r requirements.txt
+streamlit run app.py
+
+# Run tests
+pip install pytest
+pytest tests/
+```
 
 ---
 
-## 📄 License
+## 🧰 Tech Stack
 
-MIT License - See LICENSE file for details
+| Layer | Technology |
+|---|---|
+| ML | scikit-learn 1.2.2, pandas, numpy, MLflow |
+| Model serving | Custom Docker + Flask on SageMaker |
+| API | FastAPI + Uvicorn on ECS Fargate |
+| Frontend | Streamlit on ECS Fargate |
+| Infrastructure | Terraform, AWS (SageMaker, ECS, ECR, ALB, API Gateway) |
+| CI/CD | GitHub Actions + Docker BuildX (layer caching) |
+| Observability | CloudWatch Logs |
 
 ---
 
-**Built by:** David Osei Kumi  
-**Tech:** AWS SageMaker • Random Forest • Terraform • FastAPI  
-**Status:** Production-ready ML deployment with cloud infrastructure
+## 🤝 Contact
+
+**David Osei Kumi**
+[GitHub @dkumi12](https://github.com/dkumi12) · [LinkedIn](https://linkedin.com/in/david-osei-kumi) · 12dkumi@gmail.com
+
+---
+
+*MIT License*
