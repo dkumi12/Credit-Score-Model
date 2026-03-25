@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY Src/api.py .
 # Model and dataset needed for /metrics endpoint
 COPY Models/credit_scoring_model.pkl .
-COPY Data/Credit\ Score\ Classification\ Dataset.csv Credit_Score_Classification_Dataset.csv
+COPY ["Data/Credit Score Classification Dataset.csv", "Credit_Score_Classification_Dataset.csv"]
 
 ENV PYTHONUNBUFFERED=TRUE
 ENV MODEL_PATH=/app/credit_scoring_model.pkl
