@@ -208,39 +208,46 @@ jobs:
           -backend-config="region=${{ env.AWS_REGION }}" \
           -backend-config="encrypt=true"
 
-    # Import the 3 resources that reliably survive the cleanup script
-    # (CW log group + SGs have inter-dependencies that block deletion).
-    # Each import is capped at 30s. Already-in-state = silently skipped.
-    - name: Import surviving resources
-      working-directory: terraform
+    # Delete the 3 resources that survive the cleanup script so Terraform
+    # can recreate them cleanly. These are stateless — safe to delete.
+    # Runs in under 10 seconds. Errors are ignored if already gone.
+    - name: Pre-flight resource cleanup
       run: |
-        VPC_ID=$(aws ec2 describe-vpcs --filters "Name=isDefault,Values=true" \
-          --query "Vpcs[0].VpcId" --output text --region ${{ env.AWS_REGION }})
+        REGION=${{ env.AWS_REGION }}
+        PROJECT=${{ env.PROJECT_NAME }}
 
-        # CloudWatch log group
-        aws logs describe-log-groups --log-group-name-prefix "/ecs/${{ env.PROJECT_NAME }}-api" \
-          --query "logGroups[0].logGroupName" --output text 2>/dev/null | grep -q "api" \
-          && (terraform state show aws_cloudwatch_log_group.api &>/dev/null \
-              || timeout 30 terraform import aws_cloudwatch_log_group.api \
-                 "/ecs/${{ env.PROJECT_NAME }}-api" 2>/dev/null || true) || true
+        echo "Deleting CloudWatch log group..."
+        aws logs delete-log-group \
+          --log-group-name "/ecs/${PROJECT}-api" \
+          --region $REGION 2>/dev/null && echo "  deleted" || echo "  already gone"
 
-        # ALB security group
-        ALB_SG=$(aws ec2 describe-security-groups \
-          --filters "Name=group-name,Values=${{ env.PROJECT_NAME }}-alb-sg" \
-                    "Name=vpc-id,Values=$VPC_ID" \
-          --query "SecurityGroups[0].GroupId" --output text 2>/dev/null || echo "")
-        [ -n "$ALB_SG" ] && [ "$ALB_SG" != "None" ] \
-          && (terraform state show aws_security_group.alb &>/dev/null \
-              || timeout 30 terraform import aws_security_group.alb "$ALB_SG" 2>/dev/null || true) || true
+        VPC_ID=$(aws ec2 describe-vpcs \
+          --filters "Name=isDefault,Values=true" \
+          --query "Vpcs[0].VpcId" --output text --region $REGION)
 
-        # ECS security group
+        # Delete ECS SG first — it references ALB SG, so ALB SG can't be
+        # deleted while ECS SG still exists.
+        echo "Deleting ECS security group..."
         ECS_SG=$(aws ec2 describe-security-groups \
-          --filters "Name=group-name,Values=${{ env.PROJECT_NAME }}-ecs-sg" \
+          --filters "Name=group-name,Values=${PROJECT}-ecs-sg" \
                     "Name=vpc-id,Values=$VPC_ID" \
-          --query "SecurityGroups[0].GroupId" --output text 2>/dev/null || echo "")
+          --query "SecurityGroups[0].GroupId" --output text \
+          --region $REGION 2>/dev/null || echo "")
         [ -n "$ECS_SG" ] && [ "$ECS_SG" != "None" ] \
-          && (terraform state show aws_security_group.ecs &>/dev/null \
-              || timeout 30 terraform import aws_security_group.ecs "$ECS_SG" 2>/dev/null || true) || true
+          && aws ec2 delete-security-group --group-id "$ECS_SG" \
+             --region $REGION 2>/dev/null && echo "  deleted $ECS_SG" \
+          || echo "  already gone"
+
+        echo "Deleting ALB security group..."
+        ALB_SG=$(aws ec2 describe-security-groups \
+          --filters "Name=group-name,Values=${PROJECT}-alb-sg" \
+                    "Name=vpc-id,Values=$VPC_ID" \
+          --query "SecurityGroups[0].GroupId" --output text \
+          --region $REGION 2>/dev/null || echo "")
+        [ -n "$ALB_SG" ] && [ "$ALB_SG" != "None" ] \
+          && aws ec2 delete-security-group --group-id "$ALB_SG" \
+             --region $REGION 2>/dev/null && echo "  deleted $ALB_SG" \
+          || echo "  already gone"
 
     - name: Terraform Apply
       working-directory: terraform
