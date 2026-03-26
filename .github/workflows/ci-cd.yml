@@ -35,6 +35,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        pip install -r requirements-train.txt
         pip install pytest pytest-cov flake8
 
     - name: Lint (syntax errors only)
@@ -45,6 +46,7 @@ jobs:
 
     - name: Upload coverage
       uses: codecov/codecov-action@v4
+      continue-on-error: true
       with:
         file: ./coverage.xml
 
@@ -61,7 +63,7 @@ jobs:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install dependencies
-      run: pip install -r requirements.txt bandit
+      run: pip install -r requirements.txt -r requirements-train.txt bandit
 
     - name: Bandit security scan
       run: bandit -r Src/ -f json -o bandit-report.json || echo "Issues found — see report"

@@ -3,7 +3,7 @@ import boto3
 import json
 import os
 
-app = FastAPI(title="Credit Score API")
+app = FastAPI(title="Credit Default Prediction API")
 
 ENDPOINT_NAME = os.environ.get("SAGEMAKER_ENDPOINT_NAME", "credit-score-endpoint")
 AWS_REGION    = os.environ.get("AWS_REGION", "us-east-1")
@@ -18,14 +18,27 @@ async def health():
 
 @app.post("/predict")
 async def predict(data: dict):
+    # Map incoming request fields to Lending Club feature names
     payload = {
-        "Age":                data.get("age"),
-        "Gender":             data.get("gender"),
-        "Income":             data.get("income"),
-        "Education":          data.get("education"),
-        "Marital Status":     data.get("marital_status"),
-        "Number of Children": data.get("num_children"),
-        "Home Ownership":     data.get("home_ownership"),
+        "loan_amnt":            data.get("loan_amnt"),
+        "term":                 data.get("term"),
+        "int_rate":             data.get("int_rate"),
+        "installment":          data.get("installment"),
+        "grade":                data.get("grade"),
+        "sub_grade":            data.get("sub_grade"),
+        "emp_length":           data.get("emp_length"),
+        "home_ownership":       data.get("home_ownership"),
+        "annual_inc":           data.get("annual_inc"),
+        "verification_status":  data.get("verification_status"),
+        "purpose":              data.get("purpose"),
+        "dti":                  data.get("dti"),
+        "delinq_2yrs":          data.get("delinq_2yrs"),
+        "inq_last_6mths":       data.get("inq_last_6mths"),
+        "open_acc":             data.get("open_acc"),
+        "pub_rec":              data.get("pub_rec"),
+        "revol_bal":            data.get("revol_bal"),
+        "revol_util":           data.get("revol_util"),
+        "total_acc":            data.get("total_acc"),
     }
     try:
         response = client.invoke_endpoint(

@@ -2,123 +2,164 @@ import os
 import requests
 import streamlit as st
 
-st.set_page_config(page_title="Credit Score Classifier", page_icon="💳", layout="centered")
+st.set_page_config(page_title="Credit Default Predictor", page_icon="💳", layout="centered")
 
 API_URL = os.environ.get(
     "API_GATEWAY_URL",
     "https://4p97tzuzvd.execute-api.us-east-1.amazonaws.com"
 ).rstrip("/")
 
-st.title("💳 Credit Score Classifier")
-st.markdown("Enter customer details below to predict their credit score category.")
+# ── Encoding maps (match Lending Club dataset encoding) ───────────────────────
+GRADE_MAP        = {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4, "F": 5, "G": 6}
+TERM_MAP         = {"36 months": 36.0, "60 months": 60.0}
+HOME_MAP         = {"MORTGAGE": 0, "NONE": 1, "OTHER": 2, "OWN": 3, "RENT": 4}
+VERIF_MAP        = {"Not Verified": 0, "Source Verified": 1, "Verified": 2}
+PURPOSE_MAP      = {
+    "Debt Consolidation": 0, "Credit Card": 1, "Home Improvement": 2,
+    "Other": 3, "Major Purchase": 4, "Medical": 5, "Small Business": 6,
+    "Car": 7, "Vacation": 8, "Moving": 9, "House": 10,
+    "Wedding": 11, "Educational": 12, "Renewable Energy": 13,
+}
+
+st.title("💳 Credit Default Predictor")
+st.markdown("Enter loan application details to predict the likelihood of default.")
 st.markdown("---")
 
 with st.form("prediction_form"):
+    st.subheader("Loan Details")
     col1, col2 = st.columns(2)
 
     with col1:
-        age            = st.number_input("Age", min_value=18, max_value=100, value=30)
-        gender         = st.selectbox("Gender", ["Male", "Female"])
-        income         = st.number_input("Annual Income ($)", min_value=0, value=50000, step=1000)
-        education      = st.selectbox("Education Level", [
-                            "High School Diploma", "Associate's Degree",
-                            "Bachelor's Degree", "Master's Degree", "Doctorate"])
+        loan_amnt   = st.number_input("Loan Amount ($)", min_value=500, max_value=40000, value=10000, step=500)
+        term        = st.selectbox("Term", list(TERM_MAP.keys()))
+        int_rate    = st.number_input("Interest Rate (%)", min_value=5.0, max_value=30.0, value=12.0, step=0.1)
+        installment = st.number_input("Monthly Installment ($)", min_value=10.0, max_value=1500.0, value=300.0, step=5.0)
+        grade       = st.selectbox("Loan Grade", list(GRADE_MAP.keys()))
+        sub_grade_n = st.selectbox("Sub Grade (1-5)", [1, 2, 3, 4, 5], index=0)
+        purpose     = st.selectbox("Loan Purpose", list(PURPOSE_MAP.keys()))
+        dti         = st.number_input("Debt-to-Income Ratio", min_value=0.0, max_value=40.0, value=15.0, step=0.1)
 
     with col2:
-        marital_status = st.selectbox("Marital Status", ["Single", "Married"])
-        children       = st.number_input("Number of Children", min_value=0, max_value=10, value=0)
-        home_ownership = st.selectbox("Home Ownership", ["Rented", "Owned"])
+        annual_inc          = st.number_input("Annual Income ($)", min_value=10000, max_value=500000, value=60000, step=1000)
+        emp_length          = st.slider("Employment Length (years)", min_value=0, max_value=10, value=3)
+        home_ownership      = st.selectbox("Home Ownership", list(HOME_MAP.keys()))
+        verification_status = st.selectbox("Income Verification", list(VERIF_MAP.keys()))
+        revol_bal           = st.number_input("Revolving Balance ($)", min_value=0, max_value=100000, value=5000, step=500)
+        revol_util          = st.number_input("Revolving Utilisation (%)", min_value=0.0, max_value=100.0, value=40.0, step=1.0)
+        open_acc            = st.number_input("Open Credit Lines", min_value=0, max_value=30, value=8)
+        total_acc           = st.number_input("Total Credit Lines", min_value=1, max_value=80, value=20)
 
-    submitted = st.form_submit_button("🔍 Predict Credit Score", use_container_width=True)
+    st.subheader("Credit History")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        delinq_2yrs  = st.number_input("Delinquencies (2yr)", min_value=0, max_value=10, value=0)
+    with c2:
+        inq_last_6mths = st.number_input("Credit Inquiries (6mo)", min_value=0, max_value=10, value=1)
+    with c3:
+        pub_rec      = st.number_input("Public Records", min_value=0, max_value=5, value=0)
+
+    submitted = st.form_submit_button("🔍 Predict Default Risk", use_container_width=True)
 
 if submitted:
+    # Convert human-readable → encoded values
+    sub_grade_encoded = GRADE_MAP[grade] * 5 + (sub_grade_n - 1)
+
     payload = {
-        "age": age, "gender": gender, "income": float(income),
-        "education": education, "marital_status": marital_status,
-        "num_children": children, "home_ownership": home_ownership,
+        "loan_amnt":           float(loan_amnt),
+        "term":                TERM_MAP[term],
+        "int_rate":            float(int_rate),
+        "installment":         float(installment),
+        "grade":               GRADE_MAP[grade],
+        "sub_grade":           sub_grade_encoded,
+        "emp_length":          float(emp_length),
+        "home_ownership":      HOME_MAP[home_ownership],
+        "annual_inc":          float(annual_inc),
+        "verification_status": VERIF_MAP[verification_status],
+        "purpose":             PURPOSE_MAP[purpose],
+        "dti":                 float(dti),
+        "delinq_2yrs":         float(delinq_2yrs),
+        "inq_last_6mths":      float(inq_last_6mths),
+        "open_acc":            float(open_acc),
+        "pub_rec":             float(pub_rec),
+        "revol_bal":           float(revol_bal),
+        "revol_util":          float(revol_util),
+        "total_acc":           float(total_acc),
     }
 
-    with st.spinner("Analysing customer profile..."):
+    with st.spinner("Analysing loan application..."):
         try:
             resp = requests.post(f"{API_URL}/predict", json=payload, timeout=30)
             resp.raise_for_status()
-            score = resp.json().get("credit_score", "Unknown")
+            result = resp.json()
+
+            prediction = result.get("prediction", result.get("label", "Unknown"))
+            label      = result.get("label", str(prediction))
+            prob       = result.get("default_probability")
 
             st.markdown("---")
 
-            # ── Result card ───────────────────────────────────────────────────
-            SCORE_CONFIG = {
-                "High": {
-                    "emoji": "🟢", "color": "#1f7a1f",
-                    "bar": 1.0,
+            RESULT_CONFIG = {
+                0: {
+                    "label": "No Default",
                     "badge": "LOW RISK",
-                    "summary": "Strong financial profile. Likely to qualify for premium credit products with favourable interest rates.",
+                    "emoji": "🟢",
+                    "color": "#1f7a1f",
+                    "bar": 1.0 - (prob or 0.3),
+                    "summary": "This applicant is likely to repay the loan. Strong candidate for approval.",
                     "tips": [
-                        "Eligible for premium credit cards and mortgages",
-                        "Likely to receive lowest available interest rates",
-                        "Good candidate for high credit limit products",
+                        "Qualifies for standard loan terms",
+                        "Consider offering lower interest rate to retain customer",
+                        "Good candidate for credit limit increase",
                     ],
                 },
-                "Average": {
-                    "emoji": "🟡", "color": "#b38600",
-                    "bar": 0.55,
-                    "badge": "MODERATE RISK",
-                    "summary": "Satisfactory financial profile. May qualify for standard credit products with moderate rates.",
-                    "tips": [
-                        "Qualifies for standard credit cards and personal loans",
-                        "Interest rates may be slightly above prime",
-                        "Consider reducing debt-to-income ratio to improve score",
-                    ],
-                },
-                "Low": {
-                    "emoji": "🔴", "color": "#a10000",
-                    "bar": 0.2,
+                1: {
+                    "label": "Default",
                     "badge": "HIGH RISK",
-                    "summary": "Credit profile needs improvement. Limited access to mainstream credit products.",
+                    "emoji": "🔴",
+                    "color": "#a10000",
+                    "bar": prob or 0.7,
+                    "summary": "This applicant shows elevated default risk. Review before approval.",
                     "tips": [
-                        "Focus on building a consistent payment history",
-                        "Reduce existing debt before applying for new credit",
-                        "Consider a secured credit card to rebuild credit",
+                        "Consider requiring collateral or co-signer",
+                        "Reduce loan amount or shorten term to mitigate risk",
+                        "Request additional income verification",
                     ],
                 },
             }
 
-            cfg = SCORE_CONFIG.get(score, {
-                "emoji": "❓", "color": "#555", "bar": 0,
-                "badge": "UNKNOWN", "summary": score, "tips": [],
-            })
+            pred_key = int(prediction) if str(prediction).isdigit() else (0 if "No" in label else 1)
+            cfg = RESULT_CONFIG.get(pred_key, RESULT_CONFIG[1])
 
-            # Big result header
             st.markdown(
                 f"<h2 style='color:{cfg['color']}'>"
-                f"{cfg['emoji']} Credit Score: {score} &nbsp;"
+                f"{cfg['emoji']} Prediction: {cfg['label']} &nbsp;"
                 f"<span style='font-size:0.55em; background:{cfg['color']}; "
                 f"color:white; padding:3px 10px; border-radius:12px;'>"
                 f"{cfg['badge']}</span></h2>",
                 unsafe_allow_html=True,
             )
 
+            if prob is not None:
+                st.metric("Default Probability", f"{prob:.1%}")
+
             st.progress(cfg["bar"])
             st.markdown(f"**{cfg['summary']}**")
             st.markdown("---")
 
-            # Two columns: customer summary + recommendations
             c1, c2 = st.columns(2)
-
             with c1:
-                st.markdown("#### 👤 Customer Profile")
+                st.markdown("#### 📋 Loan Summary")
                 st.markdown(f"""
 | Field | Value |
 |---|---|
-| Age | {age} |
-| Gender | {gender} |
-| Annual Income | ${income:,.0f} |
-| Education | {education} |
-| Marital Status | {marital_status} |
-| Children | {children} |
-| Home Ownership | {home_ownership} |
+| Loan Amount | ${loan_amnt:,} |
+| Term | {term} |
+| Interest Rate | {int_rate}% |
+| Grade | {grade}{sub_grade_n} |
+| Purpose | {purpose} |
+| DTI | {dti}% |
+| Annual Income | ${annual_inc:,} |
 """)
-
             with c2:
                 st.markdown("#### 💡 Recommendations")
                 for tip in cfg["tips"]:
@@ -132,4 +173,4 @@ if submitted:
             st.error(f"Unexpected error: {e}")
 
 st.markdown("---")
-st.caption(f"Powered by AWS SageMaker · ECS · API Gateway | `{API_URL}`")
+st.caption(f"Powered by AWS SageMaker · ECS · API Gateway | Model: LogisticRegression · AUC 0.702 | `{API_URL}`")
