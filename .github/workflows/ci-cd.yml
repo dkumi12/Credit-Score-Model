@@ -267,17 +267,22 @@ jobs:
           --region $REGION 2>/dev/null && echo "  deleted" || echo "  already gone"
 
         # ── ECS — scale to 0 first so ENIs are released before SG deletion ─────
-        echo "Scaling ECS services to 0 and deleting..."
+        echo "Scaling ECS services to 0, deleting, and waiting for drain..."
         CLUSTER="${PROJECT}-cluster"
         for SVC in "${PROJECT}-api-service" "${PROJECT}-frontend-service"; do
           aws ecs update-service --cluster "$CLUSTER" --service "$SVC" \
             --desired-count 0 --region $REGION 2>/dev/null && echo "  scaled $SVC to 0" || echo "  $SVC not found"
         done
-        echo "Waiting 30s for tasks to drain..."
-        sleep 30
+        sleep 15
         for SVC in "${PROJECT}-api-service" "${PROJECT}-frontend-service"; do
           aws ecs delete-service --cluster "$CLUSTER" --service "$SVC" \
             --region $REGION 2>/dev/null && echo "  deleted $SVC" || echo "  $SVC already gone"
+        done
+        echo "Waiting for ECS services to become inactive..."
+        for SVC in "${PROJECT}-api-service" "${PROJECT}-frontend-service"; do
+          aws ecs wait services-inactive \
+            --cluster "$CLUSTER" --services "$SVC" \
+            --region $REGION 2>/dev/null && echo "  $SVC inactive" || echo "  $SVC wait skipped"
         done
 
         # ── ECS + networking ──────────────────────────────────────────────────
