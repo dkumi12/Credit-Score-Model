@@ -277,10 +277,23 @@ jobs:
         sleep 30
 
         # ── ECS + networking ──────────────────────────────────────────────────
-        echo "Deleting CloudWatch log group..."
-        aws logs delete-log-group \
-          --log-group-name "/ecs/${PROJECT}-api" \
-          --region $REGION 2>/dev/null && echo "  deleted" || echo "  already gone"
+        echo "Deleting CloudWatch log groups..."
+        for LG in "/ecs/${PROJECT}-api" "/ecs/${PROJECT}-frontend"; do
+          aws logs delete-log-group --log-group-name "$LG" \
+            --region $REGION 2>/dev/null && echo "  deleted $LG" || echo "  $LG already gone"
+        done
+
+        echo "Deleting ALB target groups..."
+        for TG_NAME in "${PROJECT}-tg" "${PROJECT}-frontend-tg"; do
+          TG_ARN=$(aws elbv2 describe-target-groups \
+            --names "$TG_NAME" \
+            --query "TargetGroups[0].TargetGroupArn" --output text \
+            --region $REGION 2>/dev/null || echo "")
+          [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ] \
+            && aws elbv2 delete-target-group --target-group-arn "$TG_ARN" \
+               --region $REGION 2>/dev/null && echo "  deleted $TG_NAME" \
+            || echo "  $TG_NAME already gone"
+        done
 
         VPC_ID=$(aws ec2 describe-vpcs \
           --filters "Name=isDefault,Values=true" \
