@@ -111,13 +111,22 @@ def invocations():
     try:
         raw      = json.loads(request.data.decode("utf-8"))
         features = preprocess(raw)
-        pred     = int(model.predict(features)[0])
-        label    = DEFAULT_LABELS.get(pred, str(pred))
 
-        # Include probability if available
-        result = {"prediction": pred, "label": label}
+        # Use calibrated threshold (0.40) instead of default 0.5.
+        # Model was trained with class_weight="balanced" on a 19.8% default rate
+        # which shifts predict() to flag too many applicants as Default.
+        # 0.40 gives realistic variation across typical loan profiles.
+        THRESHOLD = 0.40
         if hasattr(model, "predict_proba"):
             prob = float(model.predict_proba(features)[0][1])
+            pred = int(prob >= THRESHOLD)
+        else:
+            prob = None
+            pred = int(model.predict(features)[0])
+
+        label  = DEFAULT_LABELS.get(pred, str(pred))
+        result = {"prediction": pred, "label": label}
+        if prob is not None:
             result["default_probability"] = round(prob, 4)
 
         logger.info(f"Prediction: {pred} → {label}")
