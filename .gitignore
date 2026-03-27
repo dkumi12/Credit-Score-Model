@@ -31,3 +31,7 @@ __pycache__/
 
 # Generated training artifacts (recreated on every train.py run)
 tmp_artifacts/
+
+# Local-only documents — not for the repo
+REPORT.md
+LINKEDIN_ARTICLE_MLFLOW.md
