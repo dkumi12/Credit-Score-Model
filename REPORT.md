@@ -37,35 +37,152 @@ This project has been through multiple iterations over time. The version documen
 
 ---
 
-## 3. Model
+## 3. Model — Final Production Version
 
 | Property | Detail |
 |---|---|
-| Algorithm | Random Forest Classifier |
-| Framework | scikit-learn 1.2.2 |
-| Pipeline | `ColumnTransformer` (StandardScaler + OneHotEncoder) → `RandomForestClassifier` |
-| Training tracking | MLflow |
-| Target variable | Credit Score: Low / Average / High |
-| Dataset | 165 rows, 7 features |
+| Algorithm | Logistic Regression |
+| Framework | scikit-learn |
+| Pipeline | `StandardScaler` → `LogisticRegression(class_weight='balanced')` |
+| Training tracking | MLflow → DagsHub |
+| Target variable | Binary default label (0 = No Default, 1 = Default) |
+| Dataset | 141,259 rows — Lending Club real loan data |
+| Default rate | 19.8% (27,926 defaults / 141,259 total) |
 | Serialisation | joblib → `credit_scoring_model.pkl` |
 
 ### Input features
 
-| Feature | Type | Encoding |
-|---|---|---|
-| Age | Numeric | StandardScaler |
-| Gender | Categorical | OneHotEncoder |
-| Annual Income | Numeric | StandardScaler |
-| Education Level | Categorical | OneHotEncoder |
-| Marital Status | Categorical | OneHotEncoder |
-| Number of Children | Numeric | StandardScaler |
-| Home Ownership | Categorical | OneHotEncoder |
+| Feature | Description |
+|---|---|
+| loan_amnt | Loan amount requested |
+| term | Loan term in months (36 / 60) |
+| int_rate | Interest rate assigned by lender |
+| installment | Monthly installment amount |
+| grade | Lending Club loan grade (A–G encoded) |
+| sub_grade | Sub-grade within grade tier |
+| emp_length | Employment length in years |
+| home_ownership | Home ownership status |
+| annual_inc | Annual income |
+| verification_status | Income verification status |
+| purpose | Purpose of the loan |
+| dti | Debt-to-income ratio |
+| delinq_2yrs | Delinquencies in past 2 years |
+| inq_last_6mths | Credit inquiries in last 6 months |
+| open_acc | Number of open credit accounts |
+| pub_rec | Number of public records |
+| revol_bal | Revolving credit balance |
+| revol_util | Revolving utilisation rate |
+| total_acc | Total number of credit accounts |
 
-The model is wrapped in a full sklearn `Pipeline` so preprocessing and inference happen in a single `.predict()` call.
+All features are numeric — preprocessing is a single `StandardScaler` transform.
 
 ---
 
-## 4. Architecture
+## 4. MLflow Experiment Tracking — The Full Journey
+
+All experiments are publicly visible at:
+**https://dagshub.com/dkumi12/Credit-Score-Model.mlflow**
+
+The experiment log tells the honest story of how this model was developed — including the mistakes, the discoveries, and the reasoning behind every decision.
+
+---
+
+### Phase 1 — First Dataset (165 rows, German Credit)
+
+**What I did:** Took the original dataset from the notebook and ran 3 experiments varying `n_estimators` (50, 100, 200) on a Random Forest.
+
+**Results:**
+| Run | n_estimators | Accuracy | CV Mean |
+|---|---|---|---|
+| random-forest | 50 | 96.9% | ~0.97 |
+| random-forest | 100 | 96.9% | ~0.97 |
+| random-forest | 200 | 96.9% | ~0.97 |
+
+**What I noticed:** All three runs returned identical results. This wasn't a logging error — the model genuinely couldn't tell the difference between 50 and 200 trees.
+
+**Why it happened:** 165 rows is a tiny dataset. With that few samples, the signal is fully captured at 50 trees. More trees don't add information — there isn't enough data to find new patterns. The model had hit the ceiling of what this dataset could offer, not the ceiling of the algorithm.
+
+**Lesson:** More model complexity on small data does not improve results. The bottleneck was data, not algorithm.
+
+---
+
+### Phase 2 — Second Dataset (1,000 rows, German Credit extended) — Target Leakage Discovered
+
+**What I did:** Upgraded to a 1,000-row version of the German Credit dataset. Ran Logistic Regression, Random Forest, and XGBoost as a proper algorithm comparison.
+
+**Results:**
+| Algorithm | Accuracy | F1 | CV Mean |
+|---|---|---|---|
+| LogisticRegression | 98.5% | 0.985 | 0.968 |
+| RandomForest | 99.0% | 0.990 | 0.978 |
+| XGBoost | **100.0%** | **1.000** | **0.985** |
+
+**Why the 1.000 score was a red flag, not a win:**
+
+A perfect score on a real-world problem is almost never legitimate. It means one of three things: the test set leaked into training, the model is memorising the training data, or — what happened here — the target variable was derived directly from the features.
+
+The target label (`Credit Score: Low / Average / High`) was generated using a rule:
+
+```
+if savings + checking_account + credit_burden > threshold → High
+elif savings + checking_account + credit_burden > lower_threshold → Average
+else → Low
+```
+
+Then the model was trained on those same features to predict that label. It wasn't learning creditworthiness — it was learning to reverse-engineer a formula that was written into the data generation step. Of course it got 100%. It had seen the answer key.
+
+This is called **target leakage** — one of the most common and most dangerous mistakes in machine learning because the model appears to work perfectly in training and fails completely in production.
+
+The low ROC-AUC (0.35–0.38) was the honest signal. AUC below 0.5 means the model performs worse than random for actual classification — the only reason accuracy was high was because the majority class dominated and the derived labels were perfectly consistent.
+
+**Lesson:** A perfect score is a warning sign. Always ask where the labels came from. If the target is derived from the same features used for training, you don't have a model — you have a lookup table.
+
+---
+
+### Phase 3 — Final Dataset (141,259 rows, Lending Club) — Real Results
+
+**What I did:** Switched to the Lending Club clean dataset from HuggingFace. 141,259 real loan applications with an actual `default` label (0/1) assigned by historical outcome — did the borrower actually default or not. No derivation, no formula — real ground truth.
+
+**Results:**
+| Algorithm | AUC | PR-AUC | F1 | CV Mean |
+|---|---|---|---|---|
+| LogisticRegression | **0.702** | **0.358** | **0.420** | **0.706 ± 0.006** |
+| RandomForest | 0.692 | 0.347 | 0.091 | 0.696 ± 0.004 |
+| XGBoost | 0.681 | 0.337 | 0.403 | 0.683 ± 0.004 |
+
+**Winner: Logistic Regression — and why that makes sense:**
+
+Logistic Regression beating Random Forest and XGBoost on credit data is not a surprise to anyone who has worked in credit risk. There are specific reasons:
+
+1. **The features are already curated.** Lending Club's own risk team assigned `grade` and `sub_grade` to each loan — these are already engineered representations of creditworthiness. The relationship between these features and default probability is approximately linear by design. LR captures that directly.
+
+2. **Class imbalance.** With 19.8% default rate, tree-based models tend to over-split on the majority class and produce poor probability calibration. LR with `class_weight='balanced'` adjusts the decision boundary explicitly for imbalanced data.
+
+3. **Overfitting on tabular data.** Random Forest with 200 trees on 141k rows can overfit on noise. LR has no capacity for that kind of overfitting — it finds the single best linear boundary and stops.
+
+4. **Interpretability.** LR produces feature coefficients — you can rank which variables drive default probability most. This matters in credit risk specifically: regulators in many jurisdictions require explainable models. A black box tree ensemble fails regulatory review. A logistic regression passes.
+
+**Why AUC 0.70 is a good result:**
+
+Credit default prediction is a genuinely hard problem. Even commercial credit bureaus with access to thousands of features — full credit report, payment history, tradeline data, inquiry patterns — produce models in the 0.70–0.85 AUC range. With 19 features from a cleaned public dataset, 0.70 AUC is a legitimate, defensible result.
+
+It is a real model. It would give a real bank real signal about which loan applicants are higher risk. That is more valuable than a 99% accuracy number that is meaningless.
+
+---
+
+### Model Registry
+
+The winning Logistic Regression model was registered in MLflow Model Registry on DagsHub as `CreditScoringModel` and promoted to **Production** status — completing the full MLflow lifecycle:
+
+```
+Training run logged → Model registered → Version promoted to Production
+```
+
+This is the version saved to `Models/credit_scoring_model.pkl` and deployed to SageMaker.
+
+---
+
+## 5. Architecture
 
 ### Why This Architecture
 
@@ -117,7 +234,7 @@ Application Load Balancer
 
 ---
 
-## 5. Why SageMaker — Not Just ECS
+## 6. Why SageMaker — Not Just ECS
 
 This is an important architectural question for an MLOps project.
 
@@ -143,7 +260,7 @@ The custom Docker approach used here keeps all of SageMaker's operational benefi
 
 ---
 
-## 6. Infrastructure as Code
+## 7. Infrastructure as Code
 
 All AWS resources are defined in Terraform, split across purpose-specific files:
 
@@ -164,7 +281,7 @@ terraform/
 
 ---
 
-## 7. CI/CD Pipeline
+## 8. CI/CD Pipeline
 
 ```
 git push origin main
@@ -200,7 +317,7 @@ git push origin main
 
 ---
 
-## 8. Errors Encountered and Resolutions
+## 9. Errors Encountered and Resolutions
 
 This rebuild involved significant debugging. Every error is documented below.
 
@@ -293,7 +410,9 @@ Resolution: Attempted to add `timeouts { create = "15m" }` — discovered this b
 
 ---
 
-## 9. Final Working State
+## 10. Final Working State
+
+### First Deployment (German Credit, 165 rows)
 
 **Live endpoints at time of teardown:**
 - API: `https://4p97tzuzvd.execute-api.us-east-1.amazonaws.com`
@@ -308,11 +427,28 @@ Resolution: Attempted to add `timeouts { create = "15m" }` — discovered this b
 
 **Infrastructure destroyed** March 2026 — SageMaker `ml.m5.large` runs 24/7 at ~$0.115/hr (~$83/month) regardless of traffic, which is not justified for a portfolio project between active demo sessions.
 
+---
+
+### Second Deployment (Lending Club, 141k rows)
+
+**Model:** Logistic Regression — AUC 0.702, trained on 141,259 real Lending Club loans
+
+**Frontend form updated** to match Lending Club features — Loan Amount, Interest Rate, Grade, DTI, Annual Income, Employment Length, Purpose, Credit History.
+
+**Verified prediction:**
+```
+{ loan: $10,000, term: 36mo, int_rate: 12%, grade: A1,
+  purpose: Debt Consolidation, dti: 15%, income: $60k }
+  → Default probability: 21.0% — HIGH RISK
+```
+
+**MLflow tracking:** 13 experiment runs across 3 datasets logged to DagsHub. Best model registered as `CreditScoringModel v9`, promoted to Production.
+
 **The full codebase is preserved on GitHub.** A single push to `main` rebuilds and redeploys the entire stack from scratch via GitHub Actions.
 
 ---
 
-## 10. What Would Be Different Next Time
+## 11. What Would Be Different Next Time
 
 The architecture is sound for an MLOps project. What would be optimised:
 

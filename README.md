@@ -1,6 +1,7 @@
 # 💳 Credit Score Classifier
 
 [![CI/CD](https://github.com/dkumi12/Credit-Score-Model/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/dkumi12/Credit-Score-Model/actions/workflows/ci-cd.yml)
+[![MLflow](https://img.shields.io/badge/MLflow-Tracked%20on%20DagsHub-0194E2?logo=mlflow&logoColor=white)](https://dagshub.com/dkumi12/Credit-Score-Model.mlflow)
 [![Python](https://img.shields.io/badge/Python-3.9-3776AB?logo=python&logoColor=white)](https://python.org)
 [![AWS](https://img.shields.io/badge/AWS-SageMaker%20%7C%20ECS%20%7C%20API%20Gateway-FF9900?logo=amazon-aws&logoColor=white)](https://aws.amazon.com)
 [![Terraform](https://img.shields.io/badge/IaC-Terraform-7B42BC?logo=terraform&logoColor=white)](https://terraform.io)
@@ -30,31 +31,41 @@
 ## 🏗️ Architecture
 
 ```
-Browser
-   │
-   ▼
-Streamlit UI  ──────────────────────────────────────────────┐
-(ECS Fargate)                                               │
-                                                            │
-   ┌────────────────────────────────────────────────────────┘
-   │          POST /predict
-   ▼
-API Gateway  (HTTP API)
-   │
-   ▼
-ALB  (path-based routing)
-   │
-   ├── /predict  /health  /docs ──▶  FastAPI  (ECS Fargate)
-   │                                     │
-   │                                     │ InvokeEndpoint
-   │                                     ▼
-   │                              SageMaker Endpoint
-   │                              (custom Docker container
-   │                               scikit-learn 1.2.2
-   │                               RandomForest Pipeline)
-   │
-   └── /*  ──▶  Streamlit Frontend  (ECS Fargate)
+┌─────────────────────────────────────────────────────────────────┐
+│  EXPERIMENT LAYER                                                │
+│                                                                  │
+│  python Src/train.py                                            │
+│       │                                                          │
+│       ├── logs params, metrics, charts ──▶ DagsHub (MLflow)    │
+│       ├── registers model ──────────────▶ MLflow Model Registry │
+│       └── saves .pkl ───────────────────▶ Models/              │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │  model artifact
+                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  SERVING LAYER                                                   │
+│                                                                  │
+│  Browser                                                         │
+│     │                                                            │
+│     ▼                                                            │
+│  Streamlit UI (ECS Fargate)                                     │
+│     │  POST /predict                                             │
+│     ▼                                                            │
+│  API Gateway → ALB (path-based routing)                         │
+│                  │                                               │
+│                  ├── /predict /health /docs                      │
+│                  │      ▼                                        │
+│                  │   FastAPI (ECS Fargate)                       │
+│                  │      │  InvokeEndpoint                        │
+│                  │      ▼                                        │
+│                  │   SageMaker Endpoint                          │
+│                  │   (custom Docker — scikit-learn 1.2.2)        │
+│                  │                                               │
+│                  └── /* ──▶ Streamlit Frontend (ECS Fargate)    │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+**Live experiment tracking:** [dagshub.com/dkumi12/Credit-Score-Model.mlflow](https://dagshub.com/dkumi12/Credit-Score-Model.mlflow)
 
 ### Why custom Docker for SageMaker?
 The built-in SageMaker scikit-learn container caused dependency conflicts. Baking the exact training environment (`scikit-learn==1.2.2`, `numpy<2.0`) into a custom image eliminates version mismatches entirely.
@@ -75,6 +86,7 @@ Credit-Score-Model/
 │   └── scaler.pkl
 ├── Src/
 │   ├── api.py                  # FastAPI — /predict /health
+│   ├── train.py                # Training script — logs to DagsHub via MLflow
 │   └── utils.py                # Preprocessing helpers
 ├── docker/
 │   ├── Dockerfile.sagemaker    # Custom SageMaker inference container
@@ -98,7 +110,8 @@ Credit-Score-Model/
 ├── tests/
 │   └── test_utils.py
 ├── app.py                      # Streamlit frontend
-└── requirements.txt            # Frontend deps only
+├── requirements.txt            # Frontend deps only
+└── requirements-train.txt      # Training deps (MLflow, DagsHub, sklearn)
 ```
 
 ---
@@ -219,6 +232,27 @@ git push origin main
 bash scripts/cleanup_aws.sh
 cd terraform && terraform destroy
 ```
+
+---
+
+## 🧪 Training & Experiment Tracking
+
+All training runs are tracked on DagsHub via MLflow:
+[dagshub.com/dkumi12/Credit-Score-Model.mlflow](https://dagshub.com/dkumi12/Credit-Score-Model.mlflow)
+
+**What gets logged per run:**
+- Parameters: algorithm, n_estimators, max_depth, test_size, preprocessor
+- Metrics: accuracy, precision, recall, F1, ROC-AUC
+- Artifacts: confusion matrix, feature importance chart, classification report
+- Model: registered in MLflow Model Registry as `CreditScoringModel`
+
+**Run training locally:**
+```bash
+pip install -r requirements-train.txt
+python Src/train.py
+```
+
+On first run DagsHub will ask you to authenticate — follow the prompt and paste your DagsHub token. After that, open the DagsHub link to see your experiments live.
 
 ---
 
